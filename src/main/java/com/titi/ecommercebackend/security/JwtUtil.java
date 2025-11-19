@@ -2,11 +2,14 @@ package com.titi.ecommercebackend.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
+
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
-import java.security.Key;
+import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -14,14 +17,11 @@ import java.util.function.Function;
 
 @Component
 public class JwtUtil {
-    private final JwtSecretGenerator jwtConfig;
-    private final String SECRET_KEY = "your-secret-key-change-in-production";
-    private final long EXPIRATION_TIME = 86400000; // 24 hours
 
-    public JwtUtil(JwtSecretGenerator jwtConfig) {
-        this.jwtConfig = jwtConfig;
-    }
+    @Value("${jwt.secret}")
+    private String SECRET_KEY;
 
+    private static final long EXPIRATION_TIME = 86400000; // 24 hours
 
     public String generateToken(UserDetails userDetails) {
         Map<String, Object> claims = new HashMap<>();
@@ -34,13 +34,17 @@ public class JwtUtil {
                 .setSubject(subject)
                 .setIssuedAt(new Date(System.currentTimeMillis()))
                 .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
-                .signWith(SignatureAlgorithm.HS256, (Key) jwtConfig)
+                .signWith(getSigningKey())
                 .compact();
     }
 
     public Boolean validateToken(String token, UserDetails userDetails) {
-        final String username = extractUsername(token);
-        return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+        try {
+            final String username = extractUsername(token);
+            return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public String extractUsername(String token) {
@@ -61,6 +65,23 @@ public class JwtUtil {
     }
 
     private Claims extractAllClaims(String token) {
-        return Jwts.parser().setSigningKey((Key) jwtConfig).parseClaimsJws(token).getBody();
+        try {
+            return Jwts.parserBuilder()
+                    .setSigningKey(getSigningKey())
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse JWT token: " + e.getMessage());
+        }
+    }
+
+    private SecretKey getSigningKey() {
+        try {
+            byte[] keyBytes = Decoders.BASE64.decode(SECRET_KEY);
+            return Keys.hmacShaKeyFor(keyBytes);
+        } catch (Exception e) {
+            throw new RuntimeException("Invalid secret key format", e);
+        }
     }
 }
